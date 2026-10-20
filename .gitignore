@@ -7,3 +7,4 @@ venv/
 !.env.example
 .vscode/
 *.log
+session_hijack_demo.db
