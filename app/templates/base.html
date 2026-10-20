@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Session Hijacking Lab{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-icon">🔒</span>
+      <span class="nav-title">Session Hijacking Lab</span>
+      <span class="nav-badge">Educational Prototype</span>
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Home</a>
+      <a href="/demo" class="nav-link nav-cta {% if request.path == '/demo' %}active{% endif %}">▶ Launch Demo</a>
+    </div>
+  </nav>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <p>Session Hijacking Detection &amp; Prevention System &mdash; Educational Prototype &mdash; Local Use Only</p>
+    <p class="footer-sub">Built with Flask + Python &bull; Cryptography &amp; Security Course Project</p>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

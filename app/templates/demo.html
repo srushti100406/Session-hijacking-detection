@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Security Lab Demo — Session Hijacking{% endblock %}
+{% block content %}
+
+<div class="demo-header">
+  <h1>🔬 Security Lab: Session Hijacking Demo</h1>
+  <p class="demo-subtitle">Four-stage guided demonstration — all requests hit the real backend</p>
+</div>
+
+<!-- Stage Progress Indicator -->
+<div class="stage-indicator" id="stageIndicator">
+  <div class="stage-dot active" id="dot1" title="Stage 1: Legitimate Login">
+    <span class="dot-num">1</span>
+    <span class="dot-label">Login</span>
+  </div>
+  <div class="stage-line"></div>
+  <div class="stage-dot" id="dot2" title="Stage 2: Replay Attack">
+    <span class="dot-num">2</span>
+    <span class="dot-label">Attack</span>
+  </div>
+  <div class="stage-line"></div>
+  <div class="stage-dot" id="dot3" title="Stage 3: Detection">
+    <span class="dot-num">3</span>
+    <span class="dot-label">Detection</span>
+  </div>
+  <div class="stage-line"></div>
+  <div class="stage-dot" id="dot4" title="Stage 4: Verification">
+    <span class="dot-num">4</span>
+    <span class="dot-label">Verify</span>
+  </div>
+</div>
+
+<!-- Main Demo Panels -->
+<div class="demo-workspace">
+
+  <!-- LEFT: Legitimate User Panel -->
+  <div class="panel" id="panelUser">
+    <div class="panel-header success-header">
+      <span class="panel-icon">👤</span>
+      <h2>Legitimate User — Alice</h2>
+    </div>
+    <div class="panel-body">
+
+      <!-- STAGE 1 -->
+      <div class="stage-section" id="stage1">
+        <div class="stage-label success-label">Stage 1 — Create Legitimate Session</div>
+        <div class="field-row">
+          <label>Username</label>
+          <input type="text" id="loginUsername" value="alice" readonly class="input-readonly">
+        </div>
+        <div class="field-row">
+          <label>Password</label>
+          <input type="password" id="loginPassword" value="Demo@1234" readonly class="input-readonly">
+        </div>
+        <button class="btn btn-success" id="btnLogin" onclick="runStage1()">
+          🔐 Create Legitimate Session
+        </button>
+        <div id="stage1Result" class="result-box hidden"></div>
+        <div class="explainer" id="explainer1" style="display:none;">
+          <strong>What happened?</strong> The server validated credentials using Argon2id hashing,
+          generated a 256-bit random session ID, computed an HMAC-SHA256 proof token, stored both
+          server-side, and issued two HttpOnly cookies. The session ID alone is not sufficient.
+        </div>
+      </div>
+
+      <!-- Session Status Card -->
+      <div class="status-card" id="sessionCard" style="display:none;">
+        <div class="status-row">
+          <span class="status-label">Auth Status</span>
+          <span class="status-value success-text" id="authStatus">AUTHENTICATED</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Session Status</span>
+          <span class="status-value success-text" id="sessionStatus">ACTIVE</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">User</span>
+          <span class="status-value" id="sessionUser">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Session Fingerprint</span>
+          <span class="status-value mono" id="sessionFp">—</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Cookies Set</span>
+          <span class="status-value mono small-text">
+            <span class="cookie-badge">sid</span>
+            <span class="cookie-badge">sproof</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Protected Resource Access -->
+      <div id="protectedSection" style="display:none;">
+        <button class="btn btn-outline" onclick="accessProtectedResource()" id="btnAccess">
+          📄 Access Protected Resource
+        </button>
+        <div id="protectedResult" class="result-box hidden"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: Attacker Panel -->
+  <div class="panel" id="panelAttacker">
+    <div class="panel-header danger-header">
+      <span class="panel-icon">💀</span>
+      <h2>Simulated Attacker</h2>
+    </div>
+    <div class="panel-body">
+
+      <!-- STAGE 2 -->
+      <div class="stage-section" id="stage2" style="opacity:0.4; pointer-events:none;">
+        <div class="stage-label danger-label">Stage 2 — Replay Attack</div>
+        <div class="attacker-info">
+          <div class="info-row">
+            <span>🎯 Target</span>
+            <span class="mono">/api/protected-resource</span>
+          </div>
+          <div class="info-row">
+            <span>🔑 Has</span>
+            <span class="warning-text">Session ID cookie only</span>
+          </div>
+          <div class="info-row">
+            <span>❌ Missing</span>
+            <span class="danger-text">Proof token (sproof)</span>
+          </div>
+          <div class="info-row">
+            <span>📋 Stolen Credential</span>
+            <span class="mono small-text" id="attackerFp">—</span>
+          </div>
+        </div>
+        <div class="attacker-note">
+          The attacker has obtained the session ID but NOT the proof token.
+          This simulates partial credential theft (e.g. from a server log or non-TLS capture).
+        </div>
+        <button class="btn btn-danger" id="btnAttack" onclick="runStage2()">
+          ⚡ Execute Replay Attack
+        </button>
+        <div id="stage2Result" class="result-box hidden"></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- Detection & Prevention Panel (full width) -->
+<div class="panel full-panel" id="panelDetection" style="display:none;">
+  <div class="panel-header warning-header">
+    <span class="panel-icon">🚨</span>
+    <h2>Stage 3 — Detection &amp; Prevention</h2>
+  </div>
+  <div class="panel-body">
+    <div class="detection-grid">
+      <div class="detection-step" id="dstep1">
+        <div class="dstep-icon">📨</div>
+        <div class="dstep-text">Replay Attempt<br><span>Received</span></div>
+      </div>
+      <div class="detection-arrow">→</div>
+      <div class="detection-step" id="dstep2">
+        <div class="dstep-icon">🔍</div>
+        <div class="dstep-text">Validation<br><span>Performed</span></div>
+      </div>
+      <div class="detection-arrow">→</div>
+      <div class="detection-step" id="dstep3">
+        <div class="dstep-icon">⚠️</div>
+        <div class="dstep-text">Suspicious<br><span>Detected</span></div>
+      </div>
+      <div class="detection-arrow">→</div>
+      <div class="detection-step" id="dstep4">
+        <div class="dstep-icon">🚫</div>
+        <div class="dstep-text">Request<br><span>Rejected</span></div>
+      </div>
+      <div class="detection-arrow">→</div>
+      <div class="detection-step" id="dstep5">
+        <div class="dstep-icon">🗑️</div>
+        <div class="dstep-text">Session<br><span>Revoked</span></div>
+      </div>
+      <div class="detection-arrow">→</div>
+      <div class="detection-step" id="dstep6">
+        <div class="dstep-icon">📝</div>
+        <div class="dstep-text">Event<br><span>Recorded</span></div>
+      </div>
+    </div>
+
+    <div class="detection-details" id="detectionDetails"></div>
+
+    <button class="btn btn-warning" id="btnStage3" onclick="runStage3()" style="display:none;">
+      🔎 Confirm Detection Status
+    </button>
+    <div id="stage3Result" class="result-box hidden"></div>
+  </div>
+</div>
+
+<!-- Verification Panel (full width) -->
+<div class="panel full-panel" id="panelVerify" style="display:none;">
+  <div class="panel-header info-header">
+    <span class="panel-icon">✅</span>
+    <h2>Stage 4 — Proof that Prevention Worked</h2>
+  </div>
+  <div class="panel-body">
+    <p class="verify-desc">
+      The original session credentials (both <code>sid</code> and <code>sproof</code>) are now
+      replayed. The server must reject them because the session was revoked.
+    </p>
+    <button class="btn btn-info" id="btnStage4" onclick="runStage4()">
+      🔄 Verify Post-Revocation Rejection
+    </button>
+    <div id="stage4Result" class="result-box hidden"></div>
+  </div>
+</div>
+
+<!-- Final Result Panel -->
+<div class="panel full-panel result-panel" id="panelResult" style="display:none;">
+  <div class="panel-header" id="resultHeader"></div>
+  <div class="panel-body">
+    <div id="resultSummary" class="result-summary"></div>
+    <div id="resultConclusion" class="conclusion-box"></div>
+    <div class="result-actions">
+      <button class="btn btn-outline" onclick="resetDemo()">🔄 Reset &amp; Run Again</button>
+      <button class="btn btn-outline" onclick="document.getElementById('eventLogSection').scrollIntoView({behavior:'smooth'})">
+        📋 View Event Log
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Event Log -->
+<div class="panel full-panel" id="eventLogSection">
+  <div class="panel-header log-header">
+    <span class="panel-icon">📋</span>
+    <h2>Security Event Timeline</h2>
+    <button class="btn btn-sm btn-outline" onclick="refreshEvents()">⟳ Refresh</button>
+  </div>
+  <div class="panel-body">
+    <p class="log-note">
+      Events are real — generated by the backend. Raw session tokens and passwords are never logged.
+      Session fingerprints (<code>fp:xxxxxxxx</code>) are used for traceability.
+    </p>
+    <div id="eventLog" class="event-log">
+      <p class="log-empty">No events yet. Run the demo to see security events.</p>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/demo.js') }}"></script>
+{% endblock %}

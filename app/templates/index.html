@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Session Hijacking Lab — Introduction{% endblock %}
+{% block content %}
+
+<section class="hero">
+  <div class="hero-badge">🎓 College Cryptography &amp; Security Project</div>
+  <h1 class="hero-title">Session Hijacking<br><span class="accent">Detection &amp; Prevention</span></h1>
+  <p class="hero-sub">
+    A controlled, educational demonstration of session-based authentication attacks
+    and a working defense mechanism built in Python + Flask.
+  </p>
+  <a href="/demo" class="btn btn-primary btn-large">▶ Launch Interactive Demo</a>
+</section>
+
+<section class="concepts">
+  <div class="concept-grid">
+
+    <div class="concept-card">
+      <div class="concept-icon">🍪</div>
+      <h3>What is a Session?</h3>
+      <p>
+        After you log in, the server creates a <strong>session</strong> — a record that
+        you are authenticated. A session identifier (stored in a cookie) is sent with
+        every subsequent request so the server remembers who you are without asking
+        for your password again.
+      </p>
+    </div>
+
+    <div class="concept-card danger-card">
+      <div class="concept-icon">⚠️</div>
+      <h3>What is Session Hijacking?</h3>
+      <p>
+        If an attacker obtains a valid session identifier, they can <em>replay</em> it to
+        impersonate the legitimate user — without knowing the password. This is called
+        <strong>session hijacking</strong> or a replay attack.
+      </p>
+    </div>
+
+    <div class="concept-card">
+      <div class="concept-icon">🛡️</div>
+      <h3>What Does This Lab Demonstrate?</h3>
+      <p>
+        This lab implements a <strong>dual-token proof system</strong>. Every session requires
+        two separate credentials: a session identifier and an HMAC-based proof token.
+        The demo shows what happens when an attacker has only the session identifier.
+      </p>
+    </div>
+
+    <div class="concept-card warning-card">
+      <div class="concept-icon">📋</div>
+      <h3>What This Lab Does NOT Claim</h3>
+      <p>
+        This system detects a <em>specific scenario</em>: replay without the proof token.
+        An attacker who steals <em>both</em> credentials may still impersonate the user.
+        IP or User-Agent changes are <strong>not</strong> used as detection signals
+        because they can change during legitimate browsing.
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<section class="demo-overview">
+  <h2>Four-Stage Demonstration</h2>
+  <div class="stages-preview">
+    <div class="stage-preview">
+      <div class="stage-num success-bg">1</div>
+      <div>
+        <h4>Legitimate Login</h4>
+        <p>Authenticate as demo user "alice". Session is created with two credentials.</p>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage-preview">
+      <div class="stage-num warning-bg">2</div>
+      <div>
+        <h4>Simulated Attack</h4>
+        <p>Attacker replays only the session ID — no proof token. Real HTTP request.</p>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage-preview">
+      <div class="stage-num danger-bg">3</div>
+      <div>
+        <h4>Detection &amp; Prevention</h4>
+        <p>Server detects missing proof, rejects request, revokes session.</p>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage-preview">
+      <div class="stage-num info-bg">4</div>
+      <div>
+        <h4>Verification</h4>
+        <p>Original credentials also fail. Revocation is enforced. Demo: PASS.</p>
+      </div>
+    </div>
+  </div>
+  <div class="cta-center">
+    <a href="/demo" class="btn btn-primary btn-large">Start the Demonstration →</a>
+  </div>
+</section>
+
+<section class="tech-stack">
+  <h2>Technology Stack</h2>
+  <div class="tech-grid">
+    <div class="tech-item"><span class="tech-icon">🐍</span> Python 3.13 + Flask 3.0</div>
+    <div class="tech-item"><span class="tech-icon">🔐</span> Argon2id Password Hashing</div>
+    <div class="tech-item"><span class="tech-icon">🔑</span> HMAC-SHA256 Proof Tokens</div>
+    <div class="tech-item"><span class="tech-icon">🗄️</span> SQLite (WAL mode)</div>
+    <div class="tech-item"><span class="tech-icon">🧪</span> pytest (22 tests)</div>
+    <div class="tech-item"><span class="tech-icon">🌐</span> Vanilla JS + CSS</div>
+  </div>
+</section>
+
+{% endblock %}
