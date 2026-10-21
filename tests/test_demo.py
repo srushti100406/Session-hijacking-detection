@@ -1,9 +1,19 @@
 """Integration tests for the four-stage demo workflow."""
+from pathlib import Path
+import runpy
 import threading
 
 from werkzeug.serving import make_server
 
 from app.models import get_db
+
+
+def test_gunicorn_configuration_allows_nested_simulator_request():
+    config_path = Path(__file__).resolve().parents[1] / "gunicorn.conf.py"
+    config = runpy.run_path(str(config_path))
+
+    assert config["worker_class"] == "gthread"
+    assert config["threads"] >= 2
 
 
 def test_demo_replay_revocation_and_stage4_verification(app, client):

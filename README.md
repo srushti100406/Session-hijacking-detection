@@ -165,6 +165,8 @@ Open **http://127.0.0.1:5000** in your browser.
 
 When the host provides a `PORT` environment variable (for example, Render), the internal replay simulator uses that port; local runs default to port 5000.
 
+The repository's `gunicorn.conf.py` enables threaded workers. This is required for the demo's internal HTTP replay request: a single synchronous worker would block Stage 2 while waiting for the replay request that it must itself serve.
+
 ---
 
 ## Running Tests
