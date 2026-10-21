@@ -163,6 +163,8 @@ Output:
 
 Open **http://127.0.0.1:5000** in your browser.
 
+When the host provides a `PORT` environment variable (for example, Render), the internal replay simulator uses that port; local runs default to port 5000.
+
 ---
 
 ## Running Tests
@@ -173,7 +175,7 @@ python -m pytest tests/ -v
 
 Expected output:
 ```
-22 passed in ~5 seconds
+23 passed
 ```
 
 Test coverage:
@@ -181,6 +183,7 @@ Test coverage:
 - T05–T11: Session management (uniqueness, regeneration, fixation, expiry, admin bypass)
 - T12–T18: Detection, prevention, revocation, concurrency, log safety, reset
 - T19–T20: Simulator safety (external URL rejection)
+- Demo integration: replay detection, session revocation, final outcome logging, and Stage 4 rejection
 
 ---
 

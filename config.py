@@ -26,7 +26,7 @@ class Config:
 
     # Simulator is restricted to localhost only
     SIMULATOR_ALLOWED_HOST = "127.0.0.1"
-    SIMULATOR_PORT = 5000
+    SIMULATOR_PORT = int(os.environ.get("PORT", 5000))
 
     # Log level
     LOG_LEVEL = "INFO"

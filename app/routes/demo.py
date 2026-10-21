@@ -143,25 +143,53 @@ def stage2_replay():
     base_url = f"http://127.0.0.1:{_port()}"
     session_id = state["session_id"]
 
+    result = run_replay_attack(base_url, session_id)
+    status = get_session_status(_db(), session_id)
+    server_response = result.get("response_json") or {}
+    detected = (
+        result.get("status_code") == 401
+        and server_response.get("success") is False
+        and server_response.get("status") == "ACCESS_DENIED"
+        and server_response.get("detection") == "SUSPICIOUS_REPLAY_DETECTED"
+        and bool(
+            status
+            and status["revoked"]
+            and status["revoke_reason"] == "suspected_replay_attack"
+        )
+    )
+    session_revoked = bool(status and status["revoked"])
+
+    if detected:
+        outcome = "detected"
+        action_taken = "replay_rejected_session_revoked"
+    elif result.get("status_code") is None:
+        outcome = "failure"
+        action_taken = "simulator_request_failed"
+    elif result.get("status_code") == 200:
+        outcome = "failure"
+        action_taken = "replay_access_granted"
+    else:
+        outcome = "failure"
+        action_taken = "unexpected_server_response"
+
     conn = get_db(_db())
     sec_log.record_event(conn, "REPLAY_ATTEMPT",
                          user_id=state["user_id"],
                          username=state["username"],
                          session_fingerprint=fp,
                          reason="Demo Stage 2: attacker replaying stolen session ID without proof token",
-                         action_taken="replay_request_initiated",
-                         outcome="pending",
+                         action_taken=action_taken,
+                         outcome=outcome,
                          ip_address=request.remote_addr)
     conn.close()
 
-    result = run_replay_attack(base_url, session_id)
-
     with _demo_state_lock:
         if fp in _demo_sessions:
-            _demo_sessions[fp]["stages"]["stage2_complete"] = True
-            # Store the simulator result AND the response code alias for stage4 lookup
+            _demo_sessions[fp]["stages"]["stage2_complete"] = result.get("status_code") is not None
             stored = dict(result)
             stored["server_response_code"] = result.get("status_code")
+            stored["detected"] = detected
+            stored["session_revoked"] = session_revoked
             _demo_sessions[fp]["results"]["stage2"] = stored
 
     return jsonify({
@@ -170,8 +198,9 @@ def stage2_replay():
         "attack_type": result["attack_type"],
         "cookies_sent": result["cookies_sent"],
         "server_response_code": result["status_code"],
-        "server_response": result["response_json"],
-        "detected": result["status_code"] == 401,
+        "server_response": server_response,
+        "detected": detected,
+        "session_revoked": session_revoked,
         "description": result["description"],
         "explanation": (
             "The attacker sent ONLY the session ID cookie — no proof token. "
@@ -201,7 +230,9 @@ def stage3_detection():
     session_id = state["session_id"]
     status = get_session_status(db, session_id)
 
-    session_revoked = status["revoked"] if status else False
+    session_revoked = bool(status and status["revoked"])
+    stage2_result = state.get("results", {}).get("stage2", {})
+    replay_detected = bool(stage2_result.get("detected"))
 
     with _demo_state_lock:
         if fp in _demo_sessions:
@@ -215,14 +246,13 @@ def stage3_detection():
         "success": True,
         "stage": 3,
         "session_fingerprint": fp,
-        "detection_status": "DETECTED" if state["stages"].get("stage2_complete") else "NOT_RUN",
+        "detection_status": "DETECTED" if replay_detected else "NOT_DETECTED",
         "session_revoked": session_revoked,
         "revoke_reason": status.get("revoke_reason") if status else None,
         "explanation": (
-            "The server detected the missing proof token and classified the "
-            "request as a suspected replay attack. The session was immediately "
-            "revoked using an atomic database update to prevent concurrent "
-            "bypass attempts."
+            "The missing proof token was detected and the session was revoked."
+            if replay_detected and session_revoked else
+            "The replay detection and session revocation were not both verified."
         ),
     }), 200
 
@@ -250,10 +280,20 @@ def stage4_verify():
     session_id = state["session_id"]
     proof_token = state["proof_token"]
 
+    status = get_session_status(_db(), session_id)
+
     # Attempt access with the full original credentials (both cookies)
     result = run_legitimate_request(base_url, session_id, proof_token)
+    server_response = result.get("response_json") or {}
 
-    stage4_passed = result["status_code"] == 401
+    stage4_passed = (
+        bool(status and status["revoked"])
+        and status["revoke_reason"] == "suspected_replay_attack"
+        and result.get("status_code") == 401
+        and server_response.get("success") is False
+        and server_response.get("status") == "ACCESS_DENIED"
+        and server_response.get("reason") == "session_revoked"
+    )
 
     conn = get_db(_db())
     sec_log.record_event(conn, "REVOKED_SESSION_ACCESS",
@@ -261,26 +301,30 @@ def stage4_verify():
                          username=state["username"],
                          session_fingerprint=fp,
                          reason="Demo Stage 4: post-revocation verification attempt",
-                         action_taken="access_denied" if stage4_passed else "access_incorrectly_granted",
-                         outcome="blocked" if stage4_passed else "FAILURE",
+                         action_taken="access_denied_after_revocation" if stage4_passed else "revocation_verification_failed",
+                         outcome="blocked" if stage4_passed else "failure",
                          ip_address=request.remote_addr)
     conn.close()
 
-    # Overall demo result
     s = state["stages"]
-    all_passed = (
-        s.get("stage1_complete") and
-        s.get("stage2_complete") and
-        s.get("stage3_complete") and
-        stage4_passed
-    )
-
-    # Verify the replay was actually detected (server returned 401 in stage 2)
     stage2_result = state.get("results", {}).get("stage2", {})
-    # simulator returns status_code; stage2 API response also adds server_response_code
-    replay_detected = (
-        stage2_result.get("status_code") == 401 or
-        stage2_result.get("server_response_code") == 401
+    replay_detected = bool(stage2_result.get("detected"))
+    stage3_result = state.get("results", {}).get("stage3", {})
+    stage3_revoked = bool(stage3_result.get("session_revoked"))
+    all_passed = (
+        s.get("stage1_complete")
+        and replay_detected
+        and stage3_revoked
+        and stage4_passed
+    )
+    conclusion = (
+        "The replay was detected, rejected, and revoked; a subsequent request "
+        "with the original credentials was rejected specifically because the "
+        "session had been revoked. This applies to the controlled demonstration "
+        "scenario — not every possible form of session hijacking."
+        if all_passed else
+        "The demonstration did not pass all checks. The replay detection, "
+        "session revocation, or post-revocation access denial was not verified."
     )
 
     with _demo_state_lock:
@@ -294,21 +338,16 @@ def stage4_verify():
         "session_fingerprint": fp,
         "post_revocation_response_code": result["status_code"],
         "post_revocation_access_denied": stage4_passed,
+        "session_revoked_before_attempt": bool(status and status["revoked"]),
+        "post_revocation_reason": server_response.get("reason"),
         "demo_summary": {
             "stage1_legitimate_login": s.get("stage1_complete", False),
             "stage2_replay_detected": replay_detected,
-            "stage3_session_revoked": state.get("results", {}).get("stage3", {}).get("session_revoked", False),
+            "stage3_session_revoked": stage3_revoked,
             "stage4_revocation_enforced": stage4_passed,
-            "overall_result": "PASS" if all_passed and replay_detected else "FAIL",
+            "overall_result": "PASS" if all_passed else "FAIL",
         },
-        "conclusion": (
-            "The replay attempt was detected because the request presented "
-            "the session ID without the required proof token. The request "
-            "was denied with HTTP 401, the session was revoked, and "
-            "subsequent access using the original credentials was also rejected. "
-            "This conclusion applies to the controlled demonstration scenario — "
-            "not every possible form of session hijacking."
-        ),
+        "conclusion": conclusion,
     }), 200
 
 

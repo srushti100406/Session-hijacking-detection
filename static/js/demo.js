@@ -164,14 +164,14 @@ async function runStage2() {
     });
     const data = await resp.json();
 
-    if (!resp.ok && !data.success && data.error) {
-      showResult("stage2Result", `<strong>Error:</strong> ${data.error}`, "error");
+    if (!resp.ok || !data.success) {
+      showResult("stage2Result", `<strong>Error:</strong> ${data.error || "Replay check failed."}`, "error");
       return;
     }
 
     state.stage2Done = true;
 
-    const detected = data.detected;
+    const detected = data.detected === true;
     const code = data.server_response_code;
     const serverResp = data.server_response || {};
 
@@ -187,15 +187,15 @@ async function runStage2() {
 
     markStageDone(2);
 
-    // Animate detection steps
-    activatePanel("panelDetection");
-    animateDetectionSteps(data, serverResp);
+    if (detected) {
+      activatePanel("panelDetection");
+      animateDetectionSteps(data, serverResp);
+    }
 
     el("btnStage3").style.display = "inline-flex";
 
-    // Update session status to revoked
-    el("sessionStatus").textContent = "REVOKED";
-    el("sessionStatus").className = "status-value danger-text";
+    el("sessionStatus").textContent = data.session_revoked ? "REVOKED" : "ACTIVE";
+    el("sessionStatus").className = `status-value ${data.session_revoked ? "danger-text" : "success-text"}`;
 
     await refreshEvents();
 
@@ -305,8 +305,10 @@ async function runStage4() {
     showResult("stage4Result",
       `${httpBadge(data.post_revocation_response_code)}: 
        <span class="${data.post_revocation_access_denied ? "danger-text" : "warning-text"}">
-         ${data.post_revocation_access_denied ? "ACCESS DENIED ✓" : "ACCESS GRANTED ✗ (unexpected)"}
+         ${data.post_revocation_access_denied ? "ACCESS DENIED ✓" : "REVOCATION NOT VERIFIED ⚠️"}
        </span><br>
+       <strong>Session revoked before check:</strong> ${data.session_revoked_before_attempt ? "YES" : "NO"}<br>
+       <strong>Server reason:</strong> ${data.post_revocation_reason || "—"}<br>
        <small>${data.conclusion}</small>`,
       data.post_revocation_access_denied ? "error" : "warning"
     );
