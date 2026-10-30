@@ -16,8 +16,7 @@ if __name__ == "__main__":
     app.config["SIMULATOR_PORT"] = args.port
     print(f"\n{'='*60}")
     print("  Session Hijacking Detection & Prevention System")
-    print(f"  Running at: http://127.0.0.1:{args.port}")
-    print(f"  Demo user:  alice / Demo@1234")
+    print(f"  Running on: http://0.0.0.0:{args.port}")
     print(f"{'='*60}\n")
 
-    app.run(host="127.0.0.1", port=args.port, debug=args.debug, threaded=True)
+    app.run(host="0.0.0.0", port=args.port, debug=args.debug, threaded=True)

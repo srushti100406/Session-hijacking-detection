@@ -50,6 +50,7 @@ def init_db(db_path: str) -> None:
                 created_at      TEXT    NOT NULL,
                 expires_at      TEXT    NOT NULL,
                 revoked         INTEGER NOT NULL DEFAULT 0,
+                is_test_session INTEGER NOT NULL DEFAULT 0,
                 revoke_reason   TEXT,
                 revoked_at      TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id)
@@ -69,6 +70,15 @@ def init_db(db_path: str) -> None:
                 extra_info  TEXT
             );
         """)
+
+        session_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(sessions)")
+        }
+        if "is_test_session" not in session_columns:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN is_test_session INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.commit()
 
         # Seed demo user (password: Demo@1234)
         existing = conn.execute(

@@ -10,10 +10,13 @@
 // ── Global demo state ──
 const state = {
   sessionFingerprint: null,
+  testSessionId: null,
   stage1Done: false,
   stage2Done: false,
   stage3Done: false,
   stage4Done: false,
+  securityAlertSignature: null,
+  backendStatusSignature: null,
 };
 
 // ── Helpers ──
@@ -63,6 +66,22 @@ function formatTime(isoStr) {
   return d.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function formatTimestamp(isoStr) {
+  if (!isoStr) return "—";
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return isoStr;
+  return d.toLocaleString([], { hour12: false });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function httpBadge(code) {
   if (!code) return `<span style="color:var(--text-dim)">—</span>`;
   const cls = code === 200 ? "success-text" : "danger-text";
@@ -77,7 +96,10 @@ async function runStage1() {
     const resp = await fetch("/demo/stage1-login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "alice", password: "Demo@1234" }),
+      body: JSON.stringify({
+        username: el("loginUsername").value,
+        password: el("loginPassword").value,
+      }),
     });
     const data = await resp.json();
 
@@ -86,7 +108,9 @@ async function runStage1() {
       return;
     }
 
+    el("loginPassword").value = "";
     state.sessionFingerprint = data.session_fingerprint;
+    state.testSessionId = data.test_session_id;
     state.stage1Done = true;
 
     // Update UI
@@ -95,6 +119,9 @@ async function runStage1() {
     el("sessionCard").style.display = "block";
     el("protectedSection").style.display = "block";
     el("attackerFp").textContent = data.session_fingerprint + " (session ID fingerprint)";
+    // Keep the attacker handoff field for pasted cross-device input. The laptop
+    // retains the legitimate ID separately in state for copying.
+    el("attackerSessionId").value = "";
     el("explainer1").style.display = "block";
 
     showResult("stage1Result",
@@ -116,6 +143,21 @@ async function runStage1() {
     showResult("stage1Result", `<strong>Network error:</strong> ${err.message}`, "error");
   } finally {
     setLoading("btnLogin", false);
+    if (state.stage1Done) el("btnLogin").disabled = true;
+  }
+}
+
+async function copyTestSessionId() {
+  const sessionId = state.testSessionId;
+  if (!sessionId) {
+    showResult("stage2Result", "No legitimate test session exists. Create one on Laptop A first.", "error");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(sessionId);
+    el("stage2Result").className = "result-box hidden";
+  } catch (err) {
+    showResult("stage2Result", `Clipboard unavailable: ${err.message}. Select and copy the ID manually.`, "error");
   }
 }
 
@@ -151,32 +193,41 @@ async function accessProtectedResource() {
 // ── Stage 2 — Replay Attack ──
 
 async function runStage2() {
-  if (!state.sessionFingerprint) {
-    alert("Run Stage 1 first.");
+  const sessionId = el("attackerSessionId").value.trim();
+  if (!sessionId) {
+    showResult("stage2Result", "Paste the test session ID copied from Laptop A.", "error");
     return;
   }
+  state.testSessionId = sessionId;
   setLoading("btnAttack", true);
   try {
     const resp = await fetch("/demo/stage2-replay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_fingerprint: state.sessionFingerprint }),
+      body: JSON.stringify({ test_session_id: sessionId }),
     });
     const data = await resp.json();
 
-    if (!resp.ok || !data.success) {
-      showResult("stage2Result", `<strong>Error:</strong> ${data.error || "Replay check failed."}`, "error");
+    const detected = resp.ok && data.success === true
+      && data.detected === true && data.session_revoked === true;
+    const code = data.server_response_code;
+    const serverResp = data.server_response || {};
+
+    if (!detected) {
+      showResult("stage2Result",
+        `${httpBadge(code || resp.status)} <strong>Backend did not confirm detection and revocation.</strong><br>
+         ${serverResp.reason || data.error || "No confirmed replay result was returned."}`,
+        "error"
+      );
+      await refreshEvents();
       return;
     }
 
     state.stage2Done = true;
-
-    const detected = data.detected === true;
-    const code = data.server_response_code;
-    const serverResp = data.server_response || {};
+    state.sessionFingerprint = data.session_fingerprint;
 
     showResult("stage2Result",
-      `${httpBadge(code)} <strong>${detected ? "DETECTED & BLOCKED" : "NOT DETECTED ⚠️"}</strong><br>
+      `${httpBadge(code)} <strong>${detected ? "ATTACK BLOCKED" : "NOT DETECTED ⚠️"}</strong><br>
        <strong>Attack type:</strong> ${data.attack_type}<br>
        <strong>Cookies sent:</strong> ${(data.cookies_sent || []).join(", ")}<br>
        <strong>Server response:</strong> ${serverResp.detection || serverResp.reason || serverResp.message || "—"}<br>
@@ -251,16 +302,25 @@ function animateDetectionSteps(data, serverResp) {
 // ── Stage 3 — Confirm Detection ──
 
 async function runStage3() {
-  if (!state.sessionFingerprint) return;
+  const sessionId = el("attackerSessionId").value.trim();
+  if (!sessionId) return;
   setLoading("btnStage3", true);
   try {
     const resp = await fetch("/demo/stage3-detection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_fingerprint: state.sessionFingerprint }),
+      body: JSON.stringify({ test_session_id: sessionId }),
     });
     const data = await resp.json();
 
+    if (!resp.ok || data.success !== true) {
+      showResult("stage3Result",
+        `<strong>Backend confirmation failed:</strong> ${data.error || data.explanation || resp.status}`,
+        "error"
+      );
+      await refreshEvents();
+      return;
+    }
     state.stage3Done = true;
 
     showResult("stage3Result",
@@ -287,16 +347,25 @@ async function runStage3() {
 // ── Stage 4 — Post-Revocation Verification ──
 
 async function runStage4() {
-  if (!state.sessionFingerprint) return;
+  const sessionId = el("attackerSessionId").value.trim();
+  if (!sessionId) return;
   setLoading("btnStage4", true);
   try {
     const resp = await fetch("/demo/stage4-verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_fingerprint: state.sessionFingerprint }),
+      body: JSON.stringify({ test_session_id: sessionId }),
     });
     const data = await resp.json();
 
+    if (!resp.ok || data.success !== true) {
+      showResult("stage4Result",
+        `<strong>Backend verification failed:</strong> ${data.error || data.conclusion || resp.status}`,
+        "error"
+      );
+      await refreshEvents();
+      return;
+    }
     state.stage4Done = true;
 
     const summary = data.demo_summary || {};
@@ -339,7 +408,7 @@ function buildFinalResult(summary, conclusion) {
     <h2>Demo Result: <span style="color:${isPassed ? "var(--green-text)" : "var(--red-text)"}">${overall}</span></h2>`;
 
   const checks = [
-    ["stage1_legitimate_login", "Legitimate login succeeded"],
+    ["stage1_legitimate_access", "Legitimate user accessed protected resource"],
     ["stage2_replay_detected", "Replay attack was detected"],
     ["stage3_session_revoked", "Session was revoked"],
     ["stage4_revocation_enforced", "Post-revocation access denied"],
@@ -362,10 +431,21 @@ function buildFinalResult(summary, conclusion) {
 async function resetDemo() {
   setLoading("btnStage4", true);
   try {
-    await fetch("/demo/reset", { method: "POST" });
+    const sessionId = el("attackerSessionId").value.trim();
+    const resp = await fetch("/demo/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ test_session_id: sessionId }),
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.success !== true) {
+      showResult("stage4Result", `<strong>Reset failed:</strong> ${data.error || resp.status}`, "error");
+      return;
+    }
 
     // Reset state
     state.sessionFingerprint = null;
+    state.testSessionId = null;
     state.stage1Done = state.stage2Done = state.stage3Done = state.stage4Done = false;
 
     // Reset stage dots
@@ -389,10 +469,6 @@ async function resetDemo() {
     el("explainer1").style.display = "none";
     el("btnStage3").style.display = "none";
 
-    // Reset stage 2 lock
-    const s2 = el("stage2");
-    if (s2) { s2.style.opacity = "0.4"; s2.style.pointerEvents = "none"; }
-
     // Reset detection steps
     ["dstep1","dstep2","dstep3","dstep4","dstep5","dstep6"].forEach(id => {
       const d = el(id);
@@ -412,6 +488,10 @@ async function resetDemo() {
     el("sessionUser").textContent = "—";
     el("sessionFp").textContent = "—";
     el("attackerFp").textContent = "—";
+    el("attackerSessionId").value = "";
+    state.securityAlertSignature = null;
+    state.backendStatusSignature = null;
+    if (el("sessionHijackAlert")) el("sessionHijackAlert").style.display = "none";
 
     el("detectionDetails").innerHTML = "";
 
@@ -424,14 +504,80 @@ async function resetDemo() {
   }
 }
 
-// ── Event Log ──
+// ── Event Log and backend session status ──
+
+async function refreshBackendSession(events = []) {
+  try {
+    const resp = await fetch("/api/session-status", { cache: "no-store" });
+    if (!resp.ok) throw new Error(`Session status returned HTTP ${resp.status}`);
+    const status = await resp.json();
+    if (!status.has_session) return;
+
+    const targetFingerprint = state.sessionFingerprint || status.fingerprint;
+    if (status.fingerprint !== targetFingerprint) return;
+
+    if (!status.revoked) {
+      const activeSignature = `${status.fingerprint}:active`;
+      if (state.backendStatusSignature !== activeSignature) {
+        el("sessionStatus").textContent = "ACTIVE";
+        el("sessionStatus").className = "status-value success-text";
+        state.backendStatusSignature = activeSignature;
+      }
+      return;
+    }
+
+    const revokedSignature = `${status.fingerprint}:revoked`;
+    if (state.backendStatusSignature !== revokedSignature) {
+      el("sessionStatus").textContent = "REVOKED";
+      el("sessionStatus").className = "status-value danger-text";
+      state.backendStatusSignature = revokedSignature;
+    }
+
+    const matchingEvents = events.filter(ev => ev.session_fingerprint === targetFingerprint);
+    const detection = matchingEvents.find(ev => ev.event_type === "DETECTION_TRIGGERED");
+    const revocation = matchingEvents.find(ev => ev.event_type === "SESSION_REVOKED");
+    if (!detection) return;
+
+    activatePanel("panelDetection");
+    ["dstep1", "dstep2", "dstep3", "dstep4", "dstep5", "dstep6"].forEach(id => {
+      const step = el(id);
+      if (step && !step.classList.contains("done")) step.classList.add("done");
+    });
+
+    const httpEvent = revocation || detection;
+    const httpMatch = httpEvent.extra_info?.match(/http_status=(\d+)/i);
+    const httpResponse = httpMatch ? `HTTP ${httpMatch[1]} Access Denied` : "Backend response unavailable";
+    const alertSignature = `${detection.id}:${revocation?.id || ""}:${status.revoked_at || ""}`;
+    if (state.securityAlertSignature !== alertSignature) {
+      const alert = el("sessionHijackAlert");
+      const alertDetails = el("sessionHijackAlertDetails");
+      if (alert && alertDetails) {
+        alertDetails.innerHTML = `
+          <div><span>Target user</span><strong>${escapeHtml(detection.username || "—")}</strong></div>
+          <div><span>Attack type</span><strong>Session hijacking / replay</strong></div>
+          <div><span>Detection reason</span><strong>${escapeHtml(detection.reason || "—")}</strong></div>
+          <div><span>HTTP response</span><strong>${escapeHtml(httpResponse)}</strong></div>
+          <div><span>Session revocation</span><strong class="danger-text">REVOKED</strong></div>
+          <div><span>Timestamp</span><strong>${escapeHtml(formatTimestamp(revocation?.timestamp || status.revoked_at))}</strong></div>`;
+        alert.style.display = "block";
+      }
+      state.securityAlertSignature = alertSignature;
+    }
+  } catch (err) {
+    console.error("Failed to refresh backend session status:", err);
+  }
+}
 
 async function refreshEvents() {
+  if (refreshEvents._inProgress) return;
+  refreshEvents._inProgress = true;
   try {
-    const resp = await fetch("/api/security-events");
+    const resp = await fetch("/api/security-events", { cache: "no-store" });
+    if (!resp.ok) throw new Error(`Security events returned HTTP ${resp.status}`);
     const data = await resp.json();
     const events = data.events || [];
 
+    await refreshBackendSession(events);
     const container = el("eventLog");
     if (!container) return;
 
@@ -464,10 +610,13 @@ async function refreshEvents() {
 
   } catch (err) {
     console.error("Failed to refresh events:", err);
+  } finally {
+    refreshEvents._inProgress = false;
   }
 }
 
 // ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
   refreshEvents();
+  setInterval(refreshEvents, 2000);
 });

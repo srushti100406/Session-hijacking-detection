@@ -14,7 +14,7 @@
     <span class="dot-label">Login</span>
   </div>
   <div class="stage-line"></div>
-  <div class="stage-dot" id="dot2" title="Stage 2: Replay Attack">
+  <div class="stage-dot" id="dot2" title="Stage 2: Session Hijacking Simulation">
     <span class="dot-num">2</span>
     <span class="dot-label">Attack</span>
   </div>
@@ -50,7 +50,7 @@
         </div>
         <div class="field-row">
           <label>Password</label>
-          <input type="password" id="loginPassword" value="Demo@1234" readonly class="input-readonly">
+          <input type="password" id="loginPassword" autocomplete="current-password" required>
         </div>
         <button class="btn btn-success" id="btnLogin" onclick="runStage1()">
           🔐 Create Legitimate Session
@@ -90,6 +90,12 @@
         </div>
       </div>
 
+      <div class="security-alert" id="sessionHijackAlert" role="alert" style="display:none;">
+        <div class="security-alert-title">SESSION HIJACKING ATTEMPT DETECTED</div>
+        <div class="security-alert-status">ATTACK BLOCKED</div>
+        <div class="security-alert-grid" id="sessionHijackAlertDetails"></div>
+      </div>
+
       <!-- Protected Resource Access -->
       <div id="protectedSection" style="display:none;">
         <button class="btn btn-outline" onclick="accessProtectedResource()" id="btnAccess">
@@ -110,8 +116,8 @@
     <div class="panel-body">
 
       <!-- STAGE 2 -->
-      <div class="stage-section" id="stage2" style="opacity:0.4; pointer-events:none;">
-        <div class="stage-label danger-label">Stage 2 — Replay Attack</div>
+      <div class="stage-section" id="stage2">
+        <div class="stage-label danger-label">STAGE 2 — SESSION HIJACKING SIMULATION</div>
         <div class="attacker-info">
           <div class="info-row">
             <span>🎯 Target</span>
@@ -130,12 +136,24 @@
             <span class="mono small-text" id="attackerFp">—</span>
           </div>
         </div>
+        <div class="field-row">
+          <label for="attackerSessionId">Test session ID handoff</label>
+          <input type="text" id="attackerSessionId" autocomplete="off" spellcheck="false"
+                 aria-describedby="testSessionHelp">
+        </div>
+        <small id="testSessionHelp">
+          Copy this test-only ID from Laptop A and paste it here on Laptop B.
+          The proof credential is never included.
+        </small>
+        <button class="btn btn-outline" type="button" onclick="copyTestSessionId()">
+          📋 Copy test session ID
+        </button>
         <div class="attacker-note">
-          The attacker has obtained the session ID but NOT the proof token.
-          This simulates partial credential theft (e.g. from a server log or non-TLS capture).
+          This controlled flow targets only a database-marked test session.
+          The attacker request contains the ID only, never the proof token.
         </div>
         <button class="btn btn-danger" id="btnAttack" onclick="runStage2()">
-          ⚡ Execute Replay Attack
+          ⚡ Execute Session Hijacking Simulation
         </button>
         <div id="stage2Result" class="result-box hidden"></div>
       </div>

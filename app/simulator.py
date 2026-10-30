@@ -15,28 +15,63 @@ Safety restrictions
 """
 import re
 import requests as http
-from urllib.parse import urlparse
-from typing import Optional
+from urllib.parse import urlsplit
+from typing import Optional, Tuple
 
-# The ONLY allowed host for simulator requests
-_ALLOWED_HOST = "127.0.0.1"
+_ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 _PROTECTED_PATH = "/api/protected-resource"
 
 
-def _assert_local(url: str) -> None:
-    """Raise ValueError if the URL does not target the allowed local host."""
-    parsed = urlparse(url)
-    host = parsed.hostname or ""
-    if host not in (_ALLOWED_HOST, "localhost"):
+def _origin(url: str) -> Tuple[str, str, int]:
+    """Parse an origin and return its normalized scheme, host, and port."""
+    parsed = urlsplit(url)
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname
+
+    if scheme not in {"http", "https"} or not hostname:
+        raise ValueError("Simulator URL must be an http or https origin.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Simulator URL must not contain user information.")
+    if parsed.path not in {"", "/", _PROTECTED_PATH} or parsed.query or parsed.fragment:
+        raise ValueError("Simulator target must be an approved origin or protected-resource URL.")
+
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Simulator URL contains an invalid port.") from exc
+
+    effective_port = port if port is not None else (443 if scheme == "https" else 80)
+    return scheme, hostname.lower().rstrip("."), effective_port
+
+
+def _assert_local(url: str, allowed_origin: Optional[str] = None) -> None:
+    """Ensure the URL is either an exact configured origin or a localhost default."""
+    try:
+        target = _origin(url)
+    except ValueError as exc:
+        raise ValueError(f"Simulator target is not allowed: {exc}") from exc
+
+    if allowed_origin is not None:
+        allowed = _origin(allowed_origin)
+        if target != allowed:
+            raise ValueError(
+                f"Simulator target '{url}' is not allowed. "
+                f"Only configured origin '{allowed_origin}' is permitted."
+            )
+        return
+
+    scheme, host, _ = target
+    if host not in _ALLOWED_HOSTS:
         raise ValueError(
             f"Simulator target '{host}' is not allowed. "
-            f"Only '{_ALLOWED_HOST}' (localhost) is permitted."
+            "Only localhost is permitted by default."
         )
 
 
 def run_replay_attack(
     base_url: str,
     stolen_session_id: str,
+    allowed_origin: Optional[str] = None,
 ) -> dict:
     """
     Execute the controlled replay attack.
@@ -57,7 +92,7 @@ def run_replay_attack(
     -------
     dict with keys: status_code, response_json, attack_type, description
     """
-    _assert_local(base_url)
+    _assert_local(base_url, allowed_origin=allowed_origin)
 
     target_url = base_url.rstrip("/") + _PROTECTED_PATH
 
@@ -87,10 +122,10 @@ def run_replay_attack(
             "cookies_sent": ["sid (session identifier — NO proof token)"],
             "success": False,   # Attack should always fail if defence works
         }
-    except http.exceptions.RequestException as exc:
+    except http.exceptions.RequestException:
         return {
             "status_code": None,
-            "response_json": {"error": str(exc)},
+            "response_json": {"error": "Backend request could not be completed."},
             "attack_type": "session_id_replay_without_proof",
             "description": "HTTP request failed — server may not be running.",
             "cookies_sent": ["sid"],
@@ -102,6 +137,7 @@ def run_legitimate_request(
     base_url: str,
     session_id: str,
     proof_token: str,
+    allowed_origin: Optional[str] = None,
 ) -> dict:
     """
     Perform an authenticated request as the legitimate user (both cookies).
@@ -109,7 +145,7 @@ def run_legitimate_request(
     Used to verify that the session works BEFORE and that it is rejected
     AFTER revocation.
     """
-    _assert_local(base_url)
+    _assert_local(base_url, allowed_origin=allowed_origin)
 
     target_url = base_url.rstrip("/") + _PROTECTED_PATH
     cookies = {"sid": session_id, "sproof": proof_token}
@@ -122,10 +158,10 @@ def run_legitimate_request(
             "description": "Legitimate user request with both session ID and proof token.",
             "cookies_sent": ["sid (session identifier)", "sproof (proof token — MASKED)"],
         }
-    except http.exceptions.RequestException as exc:
+    except http.exceptions.RequestException:
         return {
             "status_code": None,
-            "response_json": {"error": str(exc)},
+            "response_json": {"error": "Backend request could not be completed."},
             "description": "HTTP request failed.",
             "cookies_sent": [],
         }
@@ -135,5 +171,5 @@ def _safe_json(response) -> dict:
     """Parse JSON response safely; return an error dict on failure."""
     try:
         return response.json()
-    except Exception:
-        return {"raw": response.text[:200]}
+    except ValueError:
+        return {"error": "Backend returned a non-JSON response."}

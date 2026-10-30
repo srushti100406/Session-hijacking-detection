@@ -538,6 +538,51 @@ input:focus-visible {
 .warning-text { color: var(--amber-text); }
 .danger-text  { color: var(--red-text); }
 
+/* ── Session hijacking alert ── */
+.security-alert {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 2px solid var(--red);
+  border-radius: var(--radius);
+  background: var(--red-dim);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.18);
+}
+
+.security-alert-title {
+  color: var(--red-text);
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.security-alert-status {
+  margin-top: 0.25rem;
+  color: var(--red-text);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.security-alert-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.security-alert-grid > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.security-alert-grid span { color: var(--text-muted); }
+
+@media (max-width: 640px) {
+  .security-alert-grid { grid-template-columns: 1fr; }
+}
+
 /* ── Explainer ── */
 .explainer {
   background: var(--bg-card2);

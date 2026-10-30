@@ -184,7 +184,19 @@ def test_T18_reset_does_not_disable_security(client):
     After resetting the demo, the protected endpoint must still require
     valid credentials.
     """
-    client.post("/demo/reset")
+    login = client.post(
+        "/demo/stage1-login",
+        json={"username": "alice", "password": "Demo@1234"},
+    )
+    assert login.status_code == 200
+    test_session_id = login.get_json()["test_session_id"]
+    reset = client.post(
+        "/demo/reset",
+        json={"test_session_id": test_session_id},
+    )
+    assert reset.status_code == 200
+    assert reset.get_json()["session_revoked"] is True
+
     resp = client.get("/api/protected-resource")
     assert resp.status_code == 401
     data = resp.get_json()

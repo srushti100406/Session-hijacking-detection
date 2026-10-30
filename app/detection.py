@@ -87,6 +87,7 @@ def evaluate_request(
                 action_taken="request_rejected",
                 outcome="detected",
                 ip_address=ip_address,
+                extra_info="http_status=401",
             )
 
             return DetectionDecision(

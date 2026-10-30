@@ -69,11 +69,12 @@ def _parse_dt(iso: str) -> datetime:
 # Public API
 # ---------------------------------------------------------------------------
 
-def create_session(
+def _create_session(
     db_path: str,
     proof_key: str,
     user_id: int,
     lifetime_seconds: int,
+    is_test_session: bool,
 ) -> Tuple[str, str]:
     """
     Create a new server-side session for the given user.
@@ -96,15 +97,43 @@ def create_session(
     try:
         conn.execute(
             """INSERT INTO sessions
-               (session_id, user_id, proof_token, created_at, expires_at, revoked)
-               VALUES (?, ?, ?, ?, ?, 0)""",
-            (session_id, user_id, proof_token, created_at, expires_at),
+               (session_id, user_id, proof_token, created_at, expires_at, revoked,
+                is_test_session)
+               VALUES (?, ?, ?, ?, ?, 0, ?)""",
+            (
+                session_id,
+                user_id,
+                proof_token,
+                created_at,
+                expires_at,
+                int(is_test_session),
+            ),
         )
         conn.commit()
     finally:
         conn.close()
 
     return session_id, proof_token
+
+
+def create_session(
+    db_path: str,
+    proof_key: str,
+    user_id: int,
+    lifetime_seconds: int,
+) -> Tuple[str, str]:
+    """Create a regular authenticated session."""
+    return _create_session(db_path, proof_key, user_id, lifetime_seconds, False)
+
+
+def create_test_session(
+    db_path: str,
+    proof_key: str,
+    user_id: int,
+    lifetime_seconds: int,
+) -> Tuple[str, str]:
+    """Create a session eligible for the controlled demo replay flow."""
+    return _create_session(db_path, proof_key, user_id, lifetime_seconds, True)
 
 
 class ValidationResult:
@@ -118,6 +147,7 @@ class ValidationResult:
         reason: Optional[str] = None,
         suspicious: bool = False,
         fingerprint: Optional[str] = None,
+        is_test_session: bool = False,
     ):
         self.valid = valid
         self.user_id = user_id
@@ -125,6 +155,7 @@ class ValidationResult:
         self.reason = reason
         self.suspicious = suspicious
         self.fingerprint = fingerprint
+        self.is_test_session = is_test_session
 
     def __repr__(self):
         return (
@@ -159,7 +190,7 @@ def validate_session(
     try:
         row = conn.execute(
             """SELECT s.session_id, s.user_id, s.proof_token, s.created_at,
-                      s.expires_at, s.revoked, u.username
+                      s.expires_at, s.revoked, s.is_test_session, u.username
                FROM sessions s
                JOIN users u ON u.id = s.user_id
                WHERE s.session_id = ?""",
@@ -216,6 +247,7 @@ def validate_session(
         user_id=row["user_id"],
         username=row["username"],
         fingerprint=fp,
+        is_test_session=bool(row["is_test_session"]),
     )
 
 

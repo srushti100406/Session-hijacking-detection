@@ -191,6 +191,22 @@ def protected_resource():
     decision = evaluate_request(db, validation, _client_ip())
 
     if decision.allow:
+        if validation.is_test_session:
+            conn = get_db(db)
+            try:
+                sec_log.record_event(
+                    conn,
+                    "TEST_SESSION_ACCESS_GRANTED",
+                    user_id=validation.user_id,
+                    username=validation.username,
+                    session_fingerprint=validation.fingerprint,
+                    reason="Demo Stage 1: legitimate test session accessed protected resource",
+                    action_taken="access_granted",
+                    outcome="success",
+                    ip_address=_client_ip(),
+                )
+            finally:
+                conn.close()
         user = get_user_by_id(db, validation.user_id)
         return jsonify({
             "success": True,
@@ -223,6 +239,7 @@ def protected_resource():
                 action_taken="session_revoked",
                 outcome="revoked",
                 ip_address=_client_ip(),
+                extra_info="http_status=401",
             )
             conn.close()
 
